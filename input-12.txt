@@ -1,0 +1,8 @@
+ Start 0
+ Stop  100
+
+ Task Phase Period Exectime Deadline NumResc Resc From  For
+    A   12    30      3       30       2       X 0 1   Y 1 2
+    B   31    40      12      40       2       Y 0 9   Z 9 3
+    C   0     70      15      70       2       X 0 8   Y 8 7
+    D   0     100     15      100      3       X 0 6   Y 6 5   Z 11 4
