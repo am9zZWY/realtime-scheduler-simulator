@@ -115,7 +115,30 @@ typedef struct list_node
 
 static list_node *nodes = NULL; /*!< Global list of nodes. Every created node is also added here. This avoids unwanted memory leaks or SIGSEGSs. */
 
+/* all prototypes in simulation.h */
+void iterator(list_node *head, void (*fct)(list_node *));
+int length(list_node *head);
+void print_task(list_node *head);
+void print_task_priority(list_node *head);
+void print_task_resource(list_node *head);
+void print_task_resources(list_node *head);
+void print_task_stats(list_node *head);
+void print_killed_task(list_node *head);
+void print_blocking_stats(list_node *head);
+void print_list(list_node *head);
+void *create_node(node_type node_type);
+list_node *get_last_node(list_node *head);
+void add_node_to_list(list_node **list, list_node *new_node);
+void create_and_add_node_to_list(list_node **list, void *node, node_type node_type);
+void remove_node_from_list(list_node **list, list_node *node_to_remove, list_node **prev_node);
+void remove_node_from_list_noprev(list_node **list, list_node *node_to_remove);
+list_node *copy_list(list_node *src);
 void *copy_node(void *src, node_type node_type);
+void free_list(list_node *head);
+void free_all(void);
+void free_node(list_node *node);
+
+
 
 /**
  * @brief Iterates through task list/queue and executes for each
@@ -384,6 +407,11 @@ void *create_node(node_type node_type)
     }
 }
 
+/**
+ * @brief Gets last node from list.
+ * @param list is the list from which the last node should be returned.
+ * @return a reference to the last node.
+ */
 list_node *get_last_node(list_node *list)
 {
     list_node *tmp_node = list;
@@ -437,7 +465,8 @@ void add_node_to_list(list_node **list, list_node *new_node)
 /**
  * @brief Creates a new node as a wrapper for a struct and adds it to the end of a list.
  *
- * @param task is a reference to the task that has to be added. It is wrapped in `struct list_node`. Must not be NULL!
+ * @param node is a reference to the task that has to be added. Must not be NULL!
+ * @param node_type is the type of the node.
  * @param list pointer to list.
  */
 void create_and_add_node_to_list(list_node **list, void *node, node_type node_type)
@@ -609,11 +638,16 @@ void free_node(list_node *node)
             break;
         case local_task_stats_t:
             break;
+        case global_task_resource_t:
+            free(node->global_task_resource->name);
+            free(node->global_task_resource);
+            break;
         case global_blocking_stats_t:
             free(node->global_blocking_stats->name);
             free(node->global_blocking_stats);
             break;
-        case node_t : if (node == node->list_node)
+        case node_t :
+            if (node == node->list_node)
             {
                 fprintf(stderr, "free_node: recursive free. Aborting!\n");
                 exit(-1);
@@ -629,9 +663,9 @@ void free_node(list_node *node)
 
 /**
  * @brief Removes a node from a list.
- * @param **list is a reference to the origin list.
- * @param *node_to_remove is a pointer of the node that should be removed.
- * @param **prev_node is the previous node in the list.
+ * @param list is a reference to the origin list.
+ * @param node_to_remove is a pointer of the node that should be removed.
+ * @param prev_node is the previous node in the list.
  */
 void remove_node_from_list(list_node **list, list_node *node_to_remove, list_node **prev_node)
 {
@@ -648,8 +682,8 @@ void remove_node_from_list(list_node **list, list_node *node_to_remove, list_nod
 
 /**
  * @brief Removes a node from list without the need of specifying a previous pointer.
- * @param **list is a reference to the origin list.
- * @param *node_to_remove is a pointer of the node that should be removed.
+ * @param list is a reference to the origin list.
+ * @param node_to_remove is a pointer of the node that should be removed.
  */
 void remove_node_from_list_noprev(list_node **list, list_node *node_to_remove)
 {
