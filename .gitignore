@@ -1,0 +1,8 @@
+# IDE
+.idea
+.dcignore
+.DS_Store
+
+# compiled and binaries
+simulator
+*.o
