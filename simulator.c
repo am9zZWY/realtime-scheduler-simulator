@@ -1,5 +1,3 @@
-#define _GNU_SOURCE
-
 #include <limits.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -18,25 +16,25 @@ static unsigned int tick; /*!< scheduler tick is updated in sim_scheduler() */
 
 /* scheduler flags, params,... */
 static unsigned int t_start; /*!< start of simulation */
-static int t_stop;           /*!< stop of simulation */
+static unsigned int t_stop;           /*!< stop of simulation */
 static bool flag_nokill;
 static bool flag_kill;
 
 #define STATUS_STRING_LENGTH 100
 #define STATUS_STRING_AMOUNT 10
 
-/* Deadlines, etc. */
-static char actions_status[STATUS_STRING_AMOUNT][STATUS_STRING_LENGTH]; /*!< Buffer for action message.\n Is reset every tick and set if e.g., a task is preempted or aborted because it missed its deadline */
-int actions_status_index;
+/* deadlines, etc. */
+static char actions_status[STATUS_STRING_AMOUNT][STATUS_STRING_LENGTH]; /*!< Buffer for action message. Is reset every tick and set if e.g., a task is preempted or aborted because it missed its deadline */
+static int actions_status_index;
 
-/* Resources */
+/* resources */
 static char resource_status[STATUS_STRING_AMOUNT][STATUS_STRING_LENGTH];
-int resource_status_index;
+static int resource_status_index;
 
 /* tasks */
-static list_node *tasks; /*!< List with all tasks.\n New instances of tasks are created from this list. */
+static list_node *tasks; /*!< List with all tasks. New instances of tasks are created from this list. */
 static int task_ids;
-static list_node *stats;         /*!< List with all global_stats.\n Each task has its own global_stat. Every instance of a task has a reference to the same global_stats */
+static list_node *stats;         /*!< List with all global_stats. Each task has its own global_stat. Every instance of a task has a reference to the same global_stats */
 static list_node *killed_tasks;  /*!< List with all tasks that were killed during schedule simulator. */
 static list_node *ready_queue;   /*!< Queue with all runnable/running tasks */
 static list_node *pending_queue; /*!< Queue with all ready tasks. Because tick scheduling is used, these task must be put into ready_queue */
@@ -44,6 +42,36 @@ static list_node *pending_queue; /*!< Queue with all ready tasks. Because tick s
 /* resources */
 static list_node *blocked_queue; /*!< Queue with all blocked tasks depending on the ressource */
 static list_node *resources;     /*!< List with all (available) resources */
+
+/* all prototypes in simulation.c */
+void print_status(char status[STATUS_STRING_AMOUNT][STATUS_STRING_LENGTH], int index);
+void add_status(char (*dst)[STATUS_STRING_LENGTH], const char src[STATUS_STRING_LENGTH], int *dst_index);
+void handle_pending_queue(void);
+void handle_ready_queue(void);
+void prioritize_tasks(list_node *list, void (*prioritize_task)(list_node *, list_node *));
+void prioritize_task_dm(list_node *task, list_node *task2);
+void prioritize_task_edf(list_node *task, list_node *task2);
+task_struct *pick_next_task(list_node *list);
+void remove_task_if_finished_execution(task_struct *task);
+void handle_deadline(list_node *task_node, list_node *kill_from_queue);
+void decrement_deadline(list_node *task);
+void handle_deadline_in_queue(list_node *queue);
+void lock_resource(task_struct *task, local_task_resource *resource);
+void lock_resources(task_struct *task);
+void unlock_resource(task_struct *task, list_node *resource);
+void unlock_resources(task_struct *task);
+void unlock_resources_if_finished(task_struct *task);
+void reset_used_by_references(task_struct *task);
+void add_tasks_from_blocked_queue_to_ready_queue(void (*prioritize_task)(list_node *, list_node *));
+void handle_tasks_to_delete(list_node **list);
+void increment_elapsed(list_node *task);
+void handle_reaction_time(void);
+void handle_preemption(const task_struct *next, task_struct *prev);
+void sim_scheduler(void (*prioritize_task)(list_node *, list_node *));
+int get_number(const char *token);
+bool check_if_resource_exists(const char *resc_name);
+void read_and_parse_input(const char *input_fp);
+
 
 /**
  * Prints the content of a buffer.
@@ -104,7 +132,7 @@ void handle_pending_queue()
 /**
  * @brief handle_ready_queue() prepares the ready queue for pick_next_task().
  *
- * It adds all "new" tasks from the pending_queue to the ready_queue.\n
+ * It adds all "new" tasks from the pending_queue to the ready_queue.
  * This function only adds items but does not remove them.
  */
 void handle_ready_queue()
@@ -197,7 +225,7 @@ void prioritize_task_dm(list_node *task, list_node *task2)
 void prioritize_task_edf(list_node *task, list_node *task2)
 {
     list_node *tmp_priorities;
-    int min_remaining_deadline;
+    unsigned int min_remaining_deadline;
     if ((task != NULL) && (task2 != NULL))
     {
         min_remaining_deadline = task->task->local_stats->t_remaining_d;
@@ -205,7 +233,7 @@ void prioritize_task_edf(list_node *task, list_node *task2)
         printf("%u prioritize_task_edf: %s%d has deadline %u\n", tick, task->task->name, task->task->task_num, task->task->t_remaining_d);
 #endif
         /* check if task has inherited task_priorities.*/
-        if ((flag_pip) && (NULL != task->task->task_priorities))
+        if (flag_pip && (NULL != task->task->task_priorities))
         {
             tmp_priorities = task->task->task_priorities;
             while (tmp_priorities != NULL)
@@ -280,9 +308,8 @@ void remove_task_if_finished_execution(task_struct *task)
 /**
  * @brief Checks if any task in a list has passed its deadline.
  * If so, depending on the kill flag, it is either killed or only removed from ready_queue.
- *
- * @param task_node
- * @param kill_from_queue
+ * @param task_node is a reference to a task in a list.
+ * @param kill_from_queue is the queue from which the task should be removed.
  */
 void handle_deadline(list_node *task_node, list_node *kill_from_queue)
 {
@@ -361,7 +388,7 @@ void decrement_deadline(list_node *task)
  *
  * Depending on the flag they are either removed from the queue or completely aborted.
  *
- * if `flag_kill` is set, the task is completely removed from the task list and is never added again to pending_queue\n
+ * if `flag_kill` is set, the task is completely removed from the task list and is never added again to pending_queue
  * if `flag_nokill` is set, the task is only removed from ready_queue but can still continue its execution in another instance.
  */
 void handle_deadline_in_queue(list_node *queue)
@@ -497,10 +524,6 @@ void lock_resource(task_struct *task, local_task_resource *resource)
         }
         tmp_resource = tmp_resource->next;
     }
-    /*
-        printf("Task %s%d: \n", task->name, task->task_num);
-        iterator(task->resources, &print_task_resource);
-        printf("\n"); */
 }
 
 /**
@@ -634,10 +657,6 @@ void unlock_resources_if_finished(task_struct *task)
             }
             task_resource = task_resource->next;
         }
-        /*
-        printf("Task %s%d: \n", task->name, task->task_num);
-        iterator(task->resources, &print_task_resource);
-        printf("\n"); */
     }
 }
 
@@ -672,7 +691,7 @@ void reset_used_by_references(task_struct *task)
  * into a separate temporary queue. After that the "right" task is selected depending on the scheduler.
  * This selected task is put into ready state and readded to ready_queue.
  *
- * @param pick_next_task is the task selection algorithm. It depends on the scheduling flag.
+ * @param prioritize_task is the task prioritization algorithm. It depends on the scheduling flag.
  */
 void add_tasks_from_blocked_queue_to_ready_queue(void (*prioritize_task)(list_node *, list_node *))
 {
@@ -755,7 +774,7 @@ void add_tasks_from_blocked_queue_to_ready_queue(void (*prioritize_task)(list_no
 /**
  * @brief handle_tasks_to_delete() iterates through ready_queue and checks if there are tasks that have a set task state.
  *
- * if task state is set to `removed` then the task is removed from the ready_queue\n
+ * if task state is set to `removed` then the task is removed from the ready_queue
  * if task state is set to `killed` then the task is completely aborted and removed from the tasks list.
  */
 void handle_tasks_to_delete(list_node **list)
@@ -836,8 +855,7 @@ void increment_elapsed(list_node *task)
 }
 
 /**
- * @brief handle_reaction_time() iterates through all tasks in ready_queue
- * @param running_task
+ * @brief handle_reaction_time() iterates through all tasks in ready- and blocked queue and increments their elapsed time.
  */
 void handle_reaction_time()
 {
@@ -847,7 +865,6 @@ void handle_reaction_time()
 
 /**
  * @brief handle_preemption() checks whether the next task[] the previous task.
- *
  * This happens when the remaining execution time of prev is above 0 and
  * is not the same as next.*When prev is preempted it must not be blocked.If it is blocked there is no preemption.
  * @param next is the actual task.*@param prev is the previous task in the queue.
@@ -1130,14 +1147,14 @@ void read_and_parse_input(const char *input_fp)
             tok_num_val = get_number(token);
             if ((line_state == start_st) && (-1 != tok_num_val))
             {
-                t_start = tok_num_val;
+                t_start = (unsigned int) tok_num_val;
                 line_state = idle_st;
                 task_state = idle_st;
                 resc_state = idle_st;
             }
             else if ((line_state == stop_st) && (-1 != tok_num_val))
             {
-                t_stop = tok_num_val;
+                t_stop = (unsigned int) tok_num_val;
                 line_state = idle_st;
                 task_state = idle_st;
                 resc_state = idle_st;
@@ -1159,20 +1176,20 @@ void read_and_parse_input(const char *input_fp)
                     switch (task_token_counter)
                     {
                     case 1:
-                        task->t_ph = tok_num_val;
+                        task->t_ph = (unsigned int) tok_num_val;
                         task_token_counter = 2;
                         break;
                     case 2:
-                        task->t_per = tok_num_val;
+                        task->t_per = (unsigned int) tok_num_val;
                         task_token_counter = 3;
                         break;
                     case 3:
-                        task->t_e = tok_num_val;
+                        task->t_e = (unsigned int) tok_num_val;
                         task->t_remaining_e = task->t_e;
                         task_token_counter = 4;
                         break;
                     case 4:
-                        task->t_d = tok_num_val;
+                        task->t_d = (unsigned int) tok_num_val;
                         task->t_remaining_d = task->t_d;
                         task_token_counter = 5;
                         task_state = finished_st;
@@ -1205,7 +1222,7 @@ void read_and_parse_input(const char *input_fp)
                         {
                             resc_state = failed_st;
                         }
-                        t_from = tok_num_val;
+                        t_from = (unsigned int) tok_num_val;
                         resc_token_counter = 2;
                     }
                     else
@@ -1230,7 +1247,7 @@ void read_and_parse_input(const char *input_fp)
                         local_resources->name = resc_name;
                         local_resources->t_from = t_from;
                         local_resources->t_from_elapsed = 0;
-                        local_resources->t_for = tok_num_val;
+                        local_resources->t_for = (unsigned int) tok_num_val;
                         local_resources->t_for_elapsed = 0;
 
                         resc_token_counter = 0;
