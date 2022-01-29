@@ -226,7 +226,7 @@ void print_task_stats(list_node *head)
 {
     if ((NULL != head) && (NULL != head->global_task_stats) && (NULL != head->global_task_stats->name))
     {
-        printf("Task: %s\tmax. Reaktionszeit: %d\n", head->global_task_stats->name, head->global_task_stats->t_elapsed);
+        printf("Task: %s\tmax. Reaction Time: %d\n", head->global_task_stats->name, head->global_task_stats->t_elapsed);
     }
 }
 
@@ -608,7 +608,6 @@ void free_node(list_node *node)
             free(node->local_task_resource);
             break;
         case local_task_stats_t:
-            // free(node->local_task_stats);
             break;
         case global_blocking_stats_t:
             free(node->global_blocking_stats->name);
