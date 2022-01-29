@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+void *Malloc(size_t size);
+
 void *Malloc(size_t size)
 {
     void *ptr = malloc(size);
