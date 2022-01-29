@@ -4,8 +4,6 @@
 #include <errno.h>
 #include <stdbool.h>
 
-#include <math.h>
-
 #include "simulator.h"
 
 /* scheduler type */
@@ -37,13 +35,11 @@ int resource_status_index;
 
 /* tasks */
 static list_node *tasks; /*!< List with all tasks.\n New instances of tasks are created from this list. */
-static list_node *untouched_tasks;
 static int task_ids;
 static list_node *stats;         /*!< List with all global_stats.\n Each task has its own global_stat. Every instance of a task has a reference to the same global_stats */
 static list_node *killed_tasks;  /*!< List with all tasks that were killed during schedule simulator. */
 static list_node *ready_queue;   /*!< Queue with all runnable/running tasks */
 static list_node *pending_queue; /*!< Queue with all ready tasks. Because tick scheduling is used, these task must be put into ready_queue */
-static list_node *blocking_times;
 
 /* resources */
 static list_node *blocked_queue; /*!< Queue with all blocked tasks depending on the ressource */
@@ -361,33 +357,24 @@ void decrement_deadline(list_node *task)
 }
 
 /**
- * @brief Checks if tasks in ready_queue missed their deadline.
+ * @brief Checks if tasks in queue missed their deadline.
  *
- * Depending on the flag they are either removed from ready_queue or completely aborted.
+ * Depending on the flag they are either removed from the queue or completely aborted.
  *
  * if `flag_kill` is set, the task is completely removed from the task list and is never added again to pending_queue\n
  * if `flag_nokill` is set, the task is only removed from ready_queue but can still continue its execution in another instance.
  */
-void handle_deadline_queues()
+void handle_deadline_in_queue(list_node *queue)
 {
     /* iterate through ready_queue and check every entry */
-    list_node *tmp_ready_queue;
-    list_node *tmp_blocked_queue;
+    list_node *tmp_queue;
 
-    tmp_ready_queue = ready_queue;
-    while (tmp_ready_queue != NULL)
+    tmp_queue = queue;
+    while (tmp_queue != NULL)
     {
-        handle_deadline(tmp_ready_queue, ready_queue);
-        decrement_deadline(tmp_ready_queue);
-        tmp_ready_queue = tmp_ready_queue->next;
-    }
-
-    tmp_blocked_queue = blocked_queue;
-    while (tmp_blocked_queue != NULL)
-    {
-        handle_deadline(tmp_blocked_queue, blocked_queue);
-        decrement_deadline(tmp_blocked_queue);
-        tmp_blocked_queue = tmp_blocked_queue->next;
+        handle_deadline(tmp_queue, queue);
+        decrement_deadline(tmp_queue);
+        tmp_queue = tmp_queue->next;
     }
 }
 
@@ -473,7 +460,7 @@ void lock_resource(task_struct *task, local_task_resource *resource)
                 {
                     /*
                      * pass all needed attributes to task in order to calculate new priority.
-                     * Because of EDF, priority can change every tick! Therefore deadlines of blocked tasks must be checked! */
+                     * Because of EDF, priority can change every tick! Therefore, deadlines of blocked tasks must be checked! */
                     task->local_stats->resource_name = strdup(resource->name);
                     create_and_add_node_to_list(&tmp_resource->global_task_resource->used_by->task_priorities, copy_node(task->local_stats, local_task_stats_t), local_task_stats_t);
                 }
@@ -859,424 +846,6 @@ void handle_reaction_time()
 }
 
 /**
- * @brief Returns the minimal value.
- * @param a
- * @param b
- * @return int is the minimal value. Can bei either a or b.
- */
-int minimal_value(int a, int b)
-{
-    if (a > b)
-    {
-        return b;
-    }
-    else
-    {
-        return a;
-    }
-}
-
-/**
- * @brief Calculates the blocking time of each task. Should be called at the before the simulation.
- */
-void blocking_time()
-{
-    list_node *tmp_task_resources;
-    list_node *tmp_task;
-    task_struct *tmp_higher_prio_task;
-    task_struct *tmp_higher_prio_task2;
-
-    list_node *tmp_global_resources;
-    list_node *tmp_global_resource;
-    list_node *tmp_local_resource;
-    local_task_resource *tmp_copy_local_resource;
-    list_node *tmp_resources; /* resources of highest prio tasks */
-
-    list_node *tmp_task_list;  /* copy of all tasks */
-    list_node *tmp_task_list2; /* 2nd copy of all tasks */
-
-    global_blocking_stats *global_blocking_stats;
-
-    int t_BT_max;
-    int t_BR_max;
-    int tmp_BT_max;
-    int tmp_BR_max;
-
-    printf("Blocking Time:\n");
-
-#ifdef DEBUG
-    printf("blocking_time: copying tasks!\n");
-#endif
-    tmp_task_list = copy_list(untouched_tasks);
-    tmp_task_list2 = copy_list(untouched_tasks);
-
-    /* calculate */
-    while (tmp_task_list != NULL)
-    {
-
-#ifdef DEBUG
-        printf("blocking_time: prioritizing tasks!\n");
-#endif
-        tmp_global_resources = NULL;
-        prioritize_tasks(tmp_task_list, &prioritize_task_dm);
-        prioritize_tasks(tmp_task_list2, &prioritize_task_dm);
-        tmp_higher_prio_task = pick_next_task(tmp_task_list);
-
-#ifdef DEBUG
-        printf("blocking_time: choosing resources!\n");
-#endif
-
-        tmp_task = tmp_task_list2;
-        while (tmp_task != NULL)
-        {
-            if (tmp_task->task->task_priority >= tmp_higher_prio_task->task_priority)
-            {
-#ifdef DEBUG
-                printf("blocking_time: adding resources from %s!\n", tmp_task->task->name);
-#endif
-                tmp_local_resource = tmp_task->task->resources;
-                while (tmp_local_resource != NULL)
-                {
-                    tmp_copy_local_resource = copy_node(tmp_local_resource->local_task_resource, local_task_resource_t);
-                    create_and_add_node_to_list(&tmp_global_resources, tmp_copy_local_resource, local_task_resource_t);
-                    tmp_local_resource = tmp_local_resource->next;
-                }
-            }
-            tmp_task = tmp_task->next;
-        }
-
-#ifdef DEBUG
-        printf("Resources:\n");
-        iterator(tmp_global_resources, &print_task_resource);
-        printf("\n");
-#endif
-
-#ifdef DEBUG
-        printf("blocking_time: picked task with highest priority!\n");
-        printf("blocking_time: calculating now BT!\n");
-#endif
-        /* BT */
-        t_BT_max = 0;
-        tmp_task = tmp_task_list;
-        /* iterate through all tasks to calulculate BT for tmp_higher_prio_task */
-        while (tmp_task != NULL)
-        {
-            tmp_BT_max = 0;
-            /* check if task has lower priority than highest priority task */
-            if (tmp_task->task->task_priority < tmp_higher_prio_task->task_priority)
-            {
-#ifdef DEBUG
-                printf("blocking_time: analyzing %s!\n", tmp_task->task->name);
-#endif
-                tmp_global_resource = tmp_global_resources;
-                while (tmp_global_resource != NULL)
-                {
-
-                    tmp_task_resources = tmp_task->task->resources;
-                    /* iterate through all resources of a task */
-                    while (tmp_task_resources != NULL)
-                    {
-                        if (0 == strcmp(tmp_global_resource->local_task_resource->name, tmp_task_resources->local_task_resource->name) && (tmp_task_resources->local_task_resource->t_for > tmp_BT_max))
-                        {
-                            tmp_BT_max = tmp_task_resources->local_task_resource->t_for;
-                        }
-                        tmp_task_resources = tmp_task_resources->next;
-                    }
-                    tmp_global_resource = tmp_global_resource->next;
-                }
-                t_BT_max += tmp_BT_max;
-            }
-            tmp_task = tmp_task->next;
-        }
-
-#ifdef DEBUG
-        printf("blocking_time: BT %d!\n", t_BT_max);
-#endif
-
-#ifdef DEBUG
-        printf("blocking_time: calculating now BR!\n");
-#endif
-        t_BR_max = 0;
-        tmp_global_resource = tmp_global_resources;
-        while (tmp_global_resource != NULL)
-        {
-            /* BR */
-            /* iterate through all global resources */
-            tmp_BR_max = 0;
-            tmp_task = tmp_task_list;
-            while (tmp_task != NULL)
-            {
-                if (tmp_task->task->task_priority < tmp_higher_prio_task->task_priority)
-                {
-                    tmp_task_resources = tmp_task->task->resources;
-                    while (tmp_task_resources != NULL)
-                    {
-                        if (0 == strcmp(tmp_global_resource->local_task_resource->name, tmp_task_resources->local_task_resource->name) && (tmp_task_resources->local_task_resource->t_for > tmp_BR_max))
-                        {
-                            tmp_BR_max = tmp_task_resources->local_task_resource->t_for;
-                        }
-                        tmp_task_resources = tmp_task_resources->next;
-                    }
-                }
-                tmp_task = tmp_task->next;
-            }
-            t_BR_max += tmp_BR_max;
-            tmp_global_resource = tmp_global_resource->next;
-        }
-
-#ifdef DEBUG
-        printf("blocking_time: BR %d!\n", t_BR_max);
-#endif
-
-        global_blocking_stats = create_node(global_blocking_stats_t);
-        global_blocking_stats->name = strdup(tmp_higher_prio_task->name);
-        global_blocking_stats->t_blocked = minimal_value(t_BR_max, t_BT_max);
-
-        create_and_add_node_to_list(&blocking_times, global_blocking_stats, global_blocking_stats_t);
-
-#ifdef DEBUG
-        printf("%s: ", tmp_higher_prio_task->name);
-        if (t_BT_max > t_BR_max)
-        {
-            printf("%d", t_BR_max);
-        }
-        else
-        {
-            printf("%d", t_BT_max);
-        }
-        printf("\n");
-#endif
-        tmp_task = tmp_task_list;
-        while (tmp_task != NULL)
-        {
-            if (tmp_task->task == tmp_higher_prio_task)
-            {
-                remove_node_from_list_noprev(&tmp_task_list, tmp_task);
-            }
-            tmp_task = tmp_task->next;
-        }
-    }
-}
-
-/**
- * @brief Calculates necessary condition for scheduling tests.
- * @param head is the start of the task list.
- * @param task is the current task.
- * @param n specifies how many iterations should be done.
- * @return int is a value that is checked in the scheduling tests.
- */
-int u(list_node *head, list_node *task, int n)
-{
-    int u;
-    int j;
-    unsigned int t_block_i;
-    list_node *tmp_task;
-    list_node *tmp_blocking_times;
-
-    tmp_blocking_times = blocking_times;
-    while (NULL != tmp_blocking_times)
-    {
-        if (0 == strcmp(task->task->name, tmp_blocking_times->global_blocking_stats->name))
-        {
-            t_block_i = tmp_blocking_times->global_blocking_stats->t_blocked;
-            break;
-        }
-        tmp_blocking_times = tmp_blocking_times->next;
-    }
-
-    u = t_block_i / minimal_value(task->task->t_d, task->task->t_per);
-
-    j = 1;
-    tmp_task = head;
-    while (tmp_task != NULL && j++ <= n)
-    {
-        if (tmp_task->task != task->task)
-        {
-            u += tmp_task->task->t_e + minimal_value(tmp_task->task->t_d, tmp_task->task->t_per);
-        }
-        tmp_task = tmp_task->next;
-    }
-    return u;
-}
-
-/**
- * @brief Calculates the necessary scheduling test for DM.
- */
-void realtime_notwendig_dm(list_node *task)
-{
-    unsigned int t;
-    unsigned int t_C;
-    unsigned int t_block;
-    list_node *tmp_task;
-    list_node *tmp_blocking_times;
-
-    tmp_blocking_times = blocking_times;
-    while (NULL != tmp_blocking_times)
-    {
-        if (0 == strcmp(task->task->name, tmp_blocking_times->global_blocking_stats->name))
-        {
-            t_block = tmp_blocking_times->global_blocking_stats->t_blocked;
-            break;
-        }
-        tmp_blocking_times = tmp_blocking_times->next;
-    }
-
-    t = task->task->t_e;
-    while (true)
-    {
-        t_C = task->task->t_e + (ceil(t / task->task->t_per) * t_block);
-        tmp_task = untouched_tasks;
-        while (tmp_task != NULL)
-        {
-            if (tmp_task->task->t_d < task->task->t_d && tmp_task->task != task->task)
-            {
-                t_C += ceil(t / tmp_task->task->t_per) + tmp_task->task->t_e;
-            }
-            tmp_task = tmp_task->next;
-        }
-
-        if (t == t_C)
-        {
-            printf("Task: %s max. Reaktionszeit: %d", task->task->name, t);
-            if (t > task->task->t_d)
-            {
-                printf(" ist damit ungültig!");
-            }
-            printf("\n");
-            break;
-        }
-
-        t = t_C;
-    }
-}
-
-/**
- * @brief Calculates the sufficent scheduling test for EDF.
- */
-void realtime_hinreichend_dm()
-{
-    list_node *tmp_task;
-    int n;
-
-    n = 1;
-    tmp_task = untouched_tasks;
-    while (tmp_task != NULL)
-    {
-        if (u(untouched_tasks, tmp_task, n) > n * (pow(2, 1 / n) - 1))
-        {
-            printf("Task: %s failed! ", tmp_task->task->name);
-            realtime_notwendig_dm(tmp_task);
-            break;
-        }
-        ++n;
-        tmp_task = tmp_task->next;
-    }
-}
-
-/**
- * @brief Calculates greatest common divisor.
- * @param a is the first value.
- * @param b is the second value.
- * @return unsigned int unsigned int is the greatest common divisor of a and b.
- */
-unsigned int ggT(unsigned int a, unsigned int b)
-{
-    unsigned int c;
-    do
-    {
-        c = a % b;
-        a = b;
-        b = c;
-    } while (c != 0);
-    return a;
-}
-
-/**
- * @brief Calculates the least common multiple.
- * @param a is the first value.
- * @param b is the second value.
- * @return unsigned int is the least common multiple of a and b.
- */
-unsigned int kgV(unsigned int a, unsigned int b)
-{
-    return a * b / ggT(a, b);
-}
-
-/**
- * @brief Calculates the necessary scheduling test for EDF.
- */
-void realtime_notwendig_edf()
-{
-    list_node *tmp_task;
-    list_node *tmp_blocking_times;
-    int t_Cges;
-    unsigned int kgV;
-    unsigned int t_block_i;
-    int i;
-
-    tmp_task = untouched_tasks;
-    kgV = tmp_task->task->t_per;
-    while (tmp_task != NULL)
-    {
-        kgV = kgV * tmp_task->task->t_per / ggT(kgV, tmp_task->task->t_per);
-        tmp_task = tmp_task->next;
-    }
-
-    for (i = 0; i < kgV; ++i)
-    {
-        tmp_task = untouched_tasks;
-        t_Cges = 0;
-        while (tmp_task != NULL)
-        {
-            tmp_blocking_times = blocking_times;
-            t_block_i = 0;
-            while (NULL != tmp_blocking_times)
-            {
-                if (0 == strcmp(tmp_task->task->name, tmp_blocking_times->global_blocking_stats->name))
-                {
-                    t_block_i = tmp_blocking_times->global_blocking_stats->t_blocked;
-                    break;
-                }
-                tmp_blocking_times = tmp_blocking_times->next;
-            }
-            t_Cges += (floor((i + tmp_task->task->t_per - tmp_task->task->t_d - tmp_task->task->t_ph) / tmp_task->task->t_per) * (tmp_task->task->t_e + t_block_i));
-            if (t_Cges > i)
-            {
-                printf("Failed, because %d > %d", t_Cges, i);
-                break;
-            }
-            tmp_task = tmp_task->next;
-        }
-        if (t_Cges > i)
-        {
-            break;
-        }
-    }
-}
-
-/**
- * @brief Calculates the sufficent scheduling test for EDF.
- */
-void realtime_hinreichend_edf()
-{
-    list_node *tmp_task;
-    int n;
-
-    n = length(untouched_tasks);
-    tmp_task = untouched_tasks;
-    while (tmp_task != NULL)
-    {
-        if (u(untouched_tasks, tmp_task, n) > 1)
-        {
-            printf("Task: %s failed! ", tmp_task->task->name);
-            realtime_notwendig_edf();
-            break;
-        }
-        tmp_task = tmp_task->next;
-    }
-}
-
-/**
  * @brief handle_preemption() checks whether the next task[] the previous task.
  *
  * This happens when the remaining execution time of prev is above 0 and
@@ -1314,8 +883,6 @@ void sim_scheduler(void (*prioritize_task)(list_node *, list_node *))
     task_struct *prev;
     task_struct *next;
 
-    blocking_time();
-
     next = NULL;
     prev = NULL;
     printf("Time\tJob\t\tReady-Q\t\tBlocked-Q\t\tActions\n");
@@ -1323,7 +890,8 @@ void sim_scheduler(void (*prioritize_task)(list_node *, list_node *))
     {
         handle_pending_queue();
         handle_ready_queue();
-        handle_deadline_queues();
+        handle_deadline_in_queue(ready_queue);
+        handle_deadline_in_queue(blocked_queue);
         handle_tasks_to_delete(&ready_queue);   /* remove all tasks marked with killed or removed flag */
         handle_tasks_to_delete(&blocked_queue); /* remove all tasks marked with killed or removed flag */
 
@@ -1384,29 +952,18 @@ void sim_scheduler(void (*prioritize_task)(list_node *, list_node *))
     printf("-----------------------------------------------\n");
 
     /* print reaction time */
-    print_list(stats);
+    if (stats != NULL) {
+        printf("Reaction Times: \n");
+        print_list(stats);
+    }
 
     /* print all killed tasks from scheduler simulator */
-    printf("Killed Jobs: ");
-    print_list(killed_tasks);
-    printf("\n");
-
-    printf("Blocking times: ");
-    print_list(blocking_times);
-    printf("\n");
-
-    if (flag_dm)
+    if (killed_tasks != NULL)
     {
-        printf("Realzeitnachweis DM: \n");
-        realtime_hinreichend_dm();
+        printf("Killed Jobs: \n");
+        print_list(killed_tasks);
         printf("\n");
     }
-    else if (flag_edf)
-    {
-        printf("Realzeitnachweis EDF: \n");
-        realtime_hinreichend_edf();
-    }
-    printf("\n");
 
     /* free all lists */
     free_all();
@@ -1716,7 +1273,6 @@ void read_and_parse_input(const char *input_fp)
             free(task);
         }
     }
-    untouched_tasks = copy_list(tasks);
     free(line);
     fclose(fp);
 }
