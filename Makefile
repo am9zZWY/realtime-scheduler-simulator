@@ -1,5 +1,6 @@
-CC=gcc
-CFLAGS=-I -Wall -Werror -std=c89
+CC = gcc
+WARNINGS = -Wall -Wextra -Wdocumentation -Wdocumentation-unknown-command -Wsign-compare -Wsign-conversion -Wmissing-variable-declarations
+CFLAGS = -I $(WARNINGS) -std=c99
 DEPS = simulator.h
 OBJ = simulator.o
 
