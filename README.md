@@ -80,11 +80,6 @@ Task: B max. Reaction Time: 16
 Task: C max. Reaction Time: 10
 ```
 
----
+## Acknowledgments and Code History
 
-**Note**:
-
-Parts of this README was written years after the code was finished by Gemini 2.5 Pro by giving it the `simulator.c` and an input file and the corresponding output.
-This is because the code is a bit messy, since it's been a long time since I ran the code.
-
----
+This README was partially generated with the assistance of Gemini 2.5 Pro, a large language model, based on the provided simulator.c code and example input/output files. The original code was written as part of a university course on Realtime Systems at HTWG Konstanz (UAS). While efforts have been made to ensure the accuracy of the information, the code's complexity and age may have introduced some inconsistencies or areas for improvement.
